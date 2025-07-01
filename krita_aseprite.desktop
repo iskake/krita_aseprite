@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+Author=iskake
+X-KDE-Library=krita_aseprite
+X-Python-2-Compatible=false
+Name=Aseprite file plugin
+Comment=A plugin for loading Aseprite files
