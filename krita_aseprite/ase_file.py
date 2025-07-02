@@ -3,6 +3,10 @@ import struct
 
 from io import BufferedReader
 
+from krita import *
+from PyQt5.QtWidgets import QFileDialog
+
+
 # unsigned int
 def read_uint(f: BufferedReader, size: int) -> int:
     return int.from_bytes(f.read(size), byteorder="little", signed=False)
@@ -79,7 +83,7 @@ class Layer:
         self.tileset_idx = tileset_idx
         self.uuid = uuid
 
-LAYER_TYPE_EDITABLE = 2
+LAYER_TYPE_TILEMAP = 2
 
 def read_chunk_layer(f: BufferedReader, use_uuid: bool):
     layer_flags = read_uint(f, 2)
@@ -99,7 +103,7 @@ def read_chunk_layer(f: BufferedReader, use_uuid: bool):
     print("      opacity:    ", opacity)
     print("      name:       ", name)
 
-    tileset_idx = read_uint(f, 4) if layer_type == LAYER_TYPE_EDITABLE else None
+    tileset_idx = read_uint(f, 4) if layer_type == LAYER_TYPE_TILEMAP else None
     uuid = read_bytes(f, 16) if use_uuid else None
 
     return Layer(
@@ -375,34 +379,24 @@ def read_user_data_chunk(f: BufferedReader):
 
     return UserData(text, color, properties)
 
+class Frame:
+    def __init__(self, cels: list[Cel]):
+        self.cels = cels
 
 
-
-
-
-class AsepriteFile:
+class AsepriteFileHeader:
     def __init__(
         self,
-        frames,
-        bounds,
-        bpp,
-        flags,
-        pal_entry,
-        num_colors,
-        px_size,
-        grid,
-        
-        palette,
-        layers,
-        cels,
-        color_profile,
-        # external_files # TODO
-        tags,
-        user_data,  #TODO!!!
-        # slice     # TODO
-        # tileset   # TODO
+        num_frames: int,
+        bounds: tuple[int,int],
+        bpp: int,
+        flags: int,
+        pal_entry: int,
+        num_colors: int,
+        px_size: tuple[int,int],
+        grid: tuple[int,int,int,int]
     ):
-        self.frames = frames
+        self.num_frames = num_frames
         self.bounds = bounds
         self.bpp = bpp
         self.flags = flags
@@ -411,10 +405,25 @@ class AsepriteFile:
         self.px_size = px_size
         self.grid = grid
 
+class AsepriteFile:
+    def __init__(
+        self,
+        header: AsepriteFileHeader,
+        palette: Palette,
+        layers: list[Layer],
+        frames: list[Frame],
+        color_profile: ColorProfile,
+        # external_files # TODO
+        tags: list[Tag],
+        user_data: UserData,  #TODO!!!
+        # slice     # TODO
+        # tileset   # TODO
+    ):
+        self.header = header
+        self.color_profile = color_profile
         self.palette = palette
         self.layers = layers
-        self.cels = cels
-        self.color_profile = color_profile
+        self.frames = frames
         # self.external_files = external_files # TODO
         self.tags = tags,
         self.user_data = user_data, #TODO!!!
@@ -434,7 +443,7 @@ def read_ase_file(filename: str):
             f.close()
             return
 
-        frames = read_uint(f, 2)
+        num_frames = read_uint(f, 2)
         width  = read_uint(f, 2)
         height = read_uint(f, 2)
         bpp    = read_uint(f, 2)
@@ -463,8 +472,7 @@ def read_ase_file(filename: str):
         # 84 zero bytes...
         f.seek(84, 1)
 
-
-        print("Frames:", frames)
+        print("Frames:", num_frames)
         print("Width: ", width)
         print("Height:", height)
         print("bpp:   ", 8, ASE_BPP[bpp])
@@ -481,7 +489,14 @@ def read_ase_file(filename: str):
         print()
         print("Individual frames:")
 
-        for frame in range(frames):
+        frames = []
+        layers = []
+        color_profile = None
+        palette = None
+        tags = None
+        user_data = []
+
+        for frame in range(num_frames):
             print(" Frame", frame)
             frame_bytes = read_uint(f, 4)
             frame_magic = read_uint(f, 2)
@@ -504,13 +519,9 @@ def read_ase_file(filename: str):
             frame_chunks = frame_chunks_old if frame_chunks_new == 0 else frame_chunks_new
 
             chunk_types = []
-            layers = []
-            cels = []
-            color_profile = None
-            palette = None
-            tags = None
             # TODO: handle for tags etc...
-            user_data = []
+
+            cels = []
 
             for chunk in range(frame_chunks):
                 print()
@@ -553,6 +564,7 @@ def read_ase_file(filename: str):
                         raise NotImplementedError(f"Currently not implemented for type: {chunk_type}")
 
                 chunk_types.append(chunk_type)
+            frames.append(Frame(cels))
             print("  Final chunk types:")
             [print(f"    {ASE_CHUNK_TYPE_NAMES[x]} ({hex(x)})") for x in chunk_types]
 
@@ -560,18 +572,19 @@ def read_ase_file(filename: str):
         print("got to the end!")
 
         return AsepriteFile(
-            frames,
-            (width, height),
-            bpp,
-            flags,
-            pal_entry,
-            num_colors,
-            (px_w, px_h),
-            (grid_x, grid_y, grid_w, grid_h),
-
+            AsepriteFileHeader(
+                num_frames,
+                (width, height),
+                bpp,
+                flags,
+                pal_entry,
+                num_colors,
+                (px_w, px_h),
+                (grid_x, grid_y, grid_w, grid_h)
+            ),
             palette,
             layers,
-            cels,
+            frames,
             color_profile,
             # external_files # TODO
             tags,
@@ -580,6 +593,159 @@ def read_ase_file(filename: str):
             # tileset   # TODO
         )
 
+
 def write_ase_file(file: AsepriteFile):
     # TODO
     ...
+
+
+def rgba_to_bgra(data: bytes):
+    for i in range(len(data)):
+        if i % 4 == 0:
+            yield data[i+2]
+        elif i % 4 == 2:
+            yield data[i-2]
+        else:
+            yield data[i]
+
+def indexed_to_bgra(data: bytes, pal: Palette):
+    for x in data:
+        r,g,b,a,_ = pal.colors[x]
+        yield b
+        yield g
+        yield r
+        yield a
+
+def create_ase_document(ase: AsepriteFile, name: str):
+    app = Krita.instance()
+
+    if ase.header.bpp == 16:
+        color_mode = "GRAYA"
+    else:
+        color_mode = "RGBA"
+
+    d = app.createDocument(
+        ase.header.bounds[0],
+        ase.header.bounds[1],
+        name,
+        color_mode,
+        "U8",
+        "",
+        300.0
+    )
+    
+    print("created document!")
+    
+    root = d.rootNode()
+    print(root.childNodes())
+    
+    parent_node_stack = [root]
+    
+    last_node = None
+    last_child_level = 0
+
+    nodes = []
+    
+    for layer in ase.layers:
+        print("Layer name:", layer.name)
+        print("child level:", layer.child_level)
+    
+        if last_node is not None and layer.child_level != last_child_level:
+            if layer.child_level < last_child_level:
+                parent_node_stack.pop()
+            else:
+                parent_node_stack.append(last_node)
+    
+        if layer.layer_type == 2:
+            raise NotImplementedError("Tilemap layer is not implemented")
+    
+        node = d.createNode(
+            layer.name,
+            "paintLayer" if layer.layer_type == 0 else "groupLayer"
+        )
+
+        node.setVisible((layer.layer_flags & 0b1) != 0)
+        node.setLocked(not (layer.layer_flags & 0b10) != 0)
+        node.setCollapsed((layer.layer_flags & 0b10_0000) != 0)
+
+        node.setOpacity(255 if layer.layer_type == 1 else layer.opacity)
+
+        match layer.blend_mode:
+            case 0:  blend_mode = "normal"
+            case 1:  blend_mode = "multiply"
+            case 2:  blend_mode = "screen"
+            case 3:  blend_mode = "overlay"
+            case 4:  blend_mode = "darken"
+            case 5:  blend_mode = "lighten"
+            case 6:  blend_mode = "dodge"
+            case 7:  blend_mode = "burn"
+            case 8:  blend_mode = "hard_light"
+            case 9:  blend_mode = "soft_light_svg"
+            case 10: blend_mode = "subtract"     # TODO: is `difference` the same as subtract?
+            case 11: blend_mode = "exclusion"
+            case 12: blend_mode = "hue"
+            case 13: blend_mode = "saturation"
+            case 14: blend_mode = "color"
+            case 15: blend_mode = "luminosity_sai" #?
+            case 16: blend_mode = "addition"
+            case 17: blend_mode = "subtract"
+            case 18: blend_mode = "divide"
+            case _: blend_mode = "normal"
+
+        node.setBlendingMode(blend_mode)
+
+        parent_node_stack[-1].addChildNode(node, None)
+        nodes.append(node)
+
+        last_node = node
+        last_child_level = layer.child_level
+
+    for frame in [ase.frames[0]]:
+        for cel in frame.cels:
+            print(cel.cel_type)
+            match cel.cel_type:
+                case 0 | 2:
+                    print("   img cel type!")
+                    node = nodes[cel.layer_idx]
+
+                    x, y = cel.pos
+                    w, h, data = cel.data
+
+                    print(x,y,w,h)
+                    print(len(data))
+
+                    if ase.header.bpp == 32:
+                        node.setPixelData(bytes(rgba_to_bgra(data)), x, y, w, h)
+                    elif ase.header.bpp == 16:
+                        # TODO: actually handle when bpp is 16 (grayscale)
+                        node.setPixelData(bytes(rgba_to_bgra(data)), x, y, w, h)
+                    else:
+                        node.setPixelData(bytes(indexed_to_bgra(data, ase.palette)), x, y, w, h)
+                case 1:
+                    print("   linked cel type!")
+                    print("   todo..")
+                    raise NotImplementedError("Indexed not implemented... yet")
+                case 3:
+                    print("   tilemap cel!")
+                    raise NotImplementedError("Tilemaps not implemented")
+                case _:
+                    raise Exception("Malformed data")
+    # print(root.childNodes())
+    d.refreshProjection()
+    
+    app.activeWindow().addView(d)
+
+if __name__ == "__main__":
+    file = QFileDialog().getOpenFileName(caption="Open Aseprite file...", filter="Aseprite files (*.ase *.aseprite)")
+    # file = ("/home/iskake/projects/krita_aseprite_plugin/test_2f.ase",)
+
+    print(f"File: {file[0]}" if file[0] else "No file selected!")
+    ase_file_name = file[0]
+
+    if not ase_file_name:
+        print("No aseprite file! returning...")
+    else:
+        ase = read_ase_file(ase_file_name)
+        if ase is not None:
+            print(f"read aseprite file with size {ase.header.bounds} and {ase.header.num_frames} frame(s)")
+            create_ase_document(ase, "abcd")

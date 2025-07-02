@@ -1,7 +1,9 @@
+from pathlib import Path
+
 from PyQt5.QtWidgets import QFileDialog
 from krita import *
 
-from .ase_file import read_ase_file
+from .ase_file import read_ase_file, create_ase_document
 
 class KritaAsepriteExtension(Extension):
     def __init__(self, parent) -> None:
@@ -26,6 +28,7 @@ class KritaAsepriteExtension(Extension):
         else:
             ase = read_ase_file(ase_file_name)
             if ase is not None:
-                print(f"read aseprite file with size {ase.bounds} and {ase.frames} frame(s)")
+                print(f"read aseprite file with size {ase.header.bounds} and {ase.header.num_frames} frame(s)")
+                create_ase_document(ase, Path(ase_file_name).name)
 
 Krita.instance().addExtension(KritaAsepriteExtension(Krita.instance()))
