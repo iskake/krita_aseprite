@@ -20,8 +20,10 @@ This plugin is currently very wip!!
 
 So far there is support for loading Aseprite files into a new document with all cels from the first frame.
 
-Some examples of things not yet implemented:
+Non-exhaustive list of things not yet implemented:
 - Saving _to_ `.aseprite` / `.ase`
+- Palettes
+    - Transparent color idx in sprites with Indexed color mode
 - Files with more than one frame (such files still load, but only the cels in the first frame will be added to the document)
 - Anything involving tiles / tilesets
 - User data
