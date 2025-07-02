@@ -42,6 +42,16 @@ def read_ignore(f: BufferedReader, size: int) -> None:
     f.seek(size, 1)
 
 
+class Point(T):
+    x: int
+    y: int
+
+class Rect(T):
+    x: int
+    y: int
+    w: int
+    h: int
+
 
 class ChunkType(IntEnum):
     PALETTE_OLD0   = 0x0004
@@ -148,7 +158,7 @@ def read_chunk_layer(f: BufferedReader, use_uuid: bool):
 
 
 class Cel:
-    def __init__(self, layer_idx: int, pos: tuple[int,int], opacity: int, cel_type: int, z_index: int, data: tuple):
+    def __init__(self, layer_idx: int, pos: Point, opacity: int, cel_type: int, z_index: int, data: tuple):
         self.layer_idx = layer_idx
         self.pos = pos
         self.opacity = opacity
@@ -232,7 +242,7 @@ def read_chunk_cel(f: BufferedReader, size: int) -> Cel:
             raise NotImplementedError()
         case _: # invalid
             raise Exception(f"Invalid cel type `{cel_type}`")
-    return Cel(layer_idx, (x_pos,y_pos), opacity, cel_type, z_index, data)
+    return Cel(layer_idx, Point(x_pos,y_pos), opacity, cel_type, z_index, data)
 
 def read_chunk_cel_extra(f: BufferedReader, cel: Cel) -> None:
     flags = read_uint(f, 4)
@@ -424,13 +434,13 @@ class AsepriteFileHeader:
     def __init__(
         self,
         num_frames: int,
-        bounds: tuple[int,int],
+        bounds: Point,
         bpp: int,
         flags: int,
         pal_entry: int,
         num_colors: int,
-        px_size: tuple[int,int],
-        grid: tuple[int,int,int,int]
+        px_size: Point,
+        grid: Rect
     ):
         self.num_frames = num_frames
         self.bounds = bounds
@@ -503,13 +513,13 @@ def read_ase_header(f: BufferedReader):
 
     return AsepriteFileHeader(
         num_frames,
-        (width, height),
+        Point(width, height),
         bpp,
         flags,
         pal_entry,
         num_colors,
-        (px_w, px_h),
-        (grid_x, grid_y, grid_w, grid_h)
+        Point(px_w, px_h),
+        Rect(grid_x, grid_y, grid_w, grid_h)
     )
 
 
@@ -789,6 +799,15 @@ def create_ase_document(ase: AsepriteFile, name: str):
 
     # TODO: is it necessary to do it this way?
     tmp_bg.remove()
+
+    # TODO: `AttributeError: 'Document' object has no attribute 'gridConfig'`
+    # grid_config = d.gridConfig()
+    # grid_config.setOffset((ase.header.grid.x,  ase.header.grid.y))
+    # grid_config.setSpacing((
+    #     16 if ase.header.grid.w == 0 else ase.header.grid.w,
+    #     16 if ase.header.grid.h == 0 else ase.header.grid.h
+    # ))
+    # d.setGridConfig(grid_config)
 
     d.refreshProjection()
     app.activeWindow().addView(d)
