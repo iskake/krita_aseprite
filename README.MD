@@ -18,13 +18,18 @@ Open aseprite file: `Tools -> Scripts -> Open Aseprite file...`
 
 This plugin is currently very wip!!
 
-So far there is support for loading Aseprite files into a new document with all cels from the first frame.
+So far there is support for opening Aseprite files into a new document with all cels from the first frame.
 
-Non-exhaustive list of things not yet implemented:
-- Saving _to_ `.aseprite` / `.ase`
+## What doesn't
+
+Here's a non-exhaustive list of things not yet implemented:
+- Saving documents as `.aseprite` / `.ase` files
 - Palettes
     - Transparent color idx in sprites with Indexed color mode
-- Files with more than one frame (such files still load, but only the cels in the first frame will be added to the document)
+- Grids
 - Anything involving tiles / tilesets
-- User data
+- Tags
+- Any and all user data (e.g. custom layer colors)
+- Files with more than one frame (such files still load, but only the cels in the first frame will be added to the document)
+    - Additionally, due to how krita handles animations vs. aseprite (with tags and user data), this might require custom dockers to implement
 - etc...
