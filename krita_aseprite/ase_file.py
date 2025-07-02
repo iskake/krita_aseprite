@@ -709,6 +709,9 @@ def create_ase_document(ase: AsepriteFile, name: str):
 
     print("created document!")
 
+    # TODO: is this always created?
+    tmp_bg = d.nodeByName("Background")
+
     root = d.rootNode()
 
     parent_node_stack = [root]
@@ -738,12 +741,9 @@ def create_ase_document(ase: AsepriteFile, name: str):
 
         node.setVisible((layer.layer_flags & LayerFlags.VISIBLE) != 0)
         node.setLocked(not (layer.layer_flags & LayerFlags.EDITABLE) != 0)
-        
+
         if layer.layer_type == LayerType.GROUP and (layer.layer_flags & LayerFlags.GROUP_COLLAPSED) != 0:
             groups_to_collapse.append(node)
-            print("!!!!!!!!!!!")
-            print("should collapse!!!!")
-            print("!!!!!!!!!!!")
 
         node.setOpacity(255 if layer.layer_type == 1 else layer.opacity)
 
@@ -778,20 +778,17 @@ def create_ase_document(ase: AsepriteFile, name: str):
                     print("   tilemap cel!")
                     raise NotImplementedError("Tilemaps not implemented")
 
+    # TODO: for some reason, attempting to set the group nodes to collapsed
+    # like this does not seem to work, but running it in the plugin dev tools
+    # console, it suddenly works perfectly...
     for node in groups_to_collapse:
-        print(node)
-        print(node.collapsed())
         node.setCollapsed(True)
-        print(node.collapsed())
+
+    # TODO: is it necessary to do it this way?
+    tmp_bg.remove()
 
     d.refreshProjection()
-
     app.activeWindow().addView(d)
-    for node in groups_to_collapse:
-        print(node)
-        print(node.collapsed())
-        node.setCollapsed(True)
-        print(node.collapsed())
 
 if __name__ == "__main__":
     file = QFileDialog().getOpenFileName(caption="Open Aseprite file...", filter="Aseprite files (*.ase *.aseprite)")
