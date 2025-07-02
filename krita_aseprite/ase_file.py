@@ -727,7 +727,10 @@ def create_ase_document(ase: AsepriteFile, name: str):
 
         if last_node is not None and layer.child_level != last_child_level:
             if layer.child_level < last_child_level:
-                parent_node_stack.pop()
+                i = last_child_level
+                while layer.child_level < i:
+                    parent_node_stack.pop()
+                    i -= 1
             else:
                 parent_node_stack.append(last_node)
 
