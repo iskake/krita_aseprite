@@ -7,6 +7,8 @@ from io import BufferedReader
 
 from krita import *
 from PyQt5.QtWidgets import QFileDialog
+from PyQt5.QtCore import QByteArray
+from PyQt5.QtGui import QImage
 
 
 # unsigned int
@@ -659,22 +661,12 @@ def write_ase_file(file: AsepriteFile):
     # TODO
     ...
 
-
-def rgba_to_bgra(data: bytes):
-    for i in range(len(data)):
-        if i % 4 == 0:
-            yield data[i+2]
-        elif i % 4 == 2:
-            yield data[i-2]
-        else:
-            yield data[i]
-
-def indexed_to_bgra(data: bytes, pal: Palette, bg_idx: int):
+def indexed_to_rgba(data: bytes, pal: Palette, bg_idx: int):
     for x in data:
         r,g,b,a,_ = pal.colors[x] if x != bg_idx else (0, 0, 0, 0, None)
-        yield b
-        yield g
         yield r
+        yield g
+        yield b
         yield a
 
 BLEND_MODES = [
@@ -779,12 +771,17 @@ def create_ase_document(ase: AsepriteFile, name: str):
                     w, h, data = cel.data
 
                     if ase.header.bpp == 32:    # RGBA
-                        node.setPixelData(bytes(rgba_to_bgra(data)), x, y, w, h)
+                        img_data = QImage(data, w, h, QImage.Format_RGBA8888).rgbSwapped()
                     elif ase.header.bpp == 16:  # Grayscale
-                        node.setPixelData(data, x, y, w, h)
+                        img_data = QImage(data, w, h, QImage.Format_Grayscale16)
                     else:                       # Indexed
                         bg_idx = ase.header.pal_entry if (ase.layers[cel.layer_idx].layer_flags & LayerFlags.BACKGROUND) == 0 else -1
-                        node.setPixelData(bytes(indexed_to_bgra(data, ase.palette, bg_idx)), x, y, w, h)
+                        img_data = QImage(bytes(indexed_to_rgba(data, ase.palette, bg_idx)), w, h, QImage.Format_RGBA8888).rgbSwapped()
+
+                    ptr = img_data.bits()
+                    ptr.setsize(img_data.byteCount())
+                    node.setPixelData(QByteArray(ptr.asstring()), x, y, w, h)
+
                 case CelType.LINKED:
                     print("   linked cel type!")
                     raise NotImplementedError("Linked cels not implemented... yet")
