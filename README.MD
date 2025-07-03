@@ -1,6 +1,6 @@
 # Krita Aseprite file plugin
 
-Plugin for loading aseprite files in Krita.
+Krita plugin for working with Aseprite files (`*.aseprite` / `*.ase`)
 
 ![Demo image](demo.png)
 
@@ -18,7 +18,7 @@ Open aseprite file: `Tools -> Scripts -> Open Aseprite file...`
 
 This plugin is currently very wip!!
 
-So far there is support for opening Aseprite files into a new document with all cels from the first frame.
+So far the project is in a state where most "normal" single frame images load correctly. Specifically there is support for opening Aseprite files into a new document with all cels from the first frame.
 
 ## What doesn't
 
