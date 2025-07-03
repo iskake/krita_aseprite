@@ -439,6 +439,7 @@ class AsepriteFileHeader:
         bounds: Point,
         bpp: int,
         flags: int,
+        speed: int,
         pal_entry: int,
         num_colors: int,
         px_size: Point,
@@ -448,6 +449,7 @@ class AsepriteFileHeader:
         self.bounds = bounds
         self.bpp = bpp
         self.flags = flags
+        self.speed = speed
         self.pal_entry = pal_entry
         self.num_colors = num_colors
         self.px_size = px_size
@@ -475,8 +477,8 @@ def read_ase_header(f: BufferedReader):
     height = read_uint(f, 2)
     bpp    = read_uint(f, 2)
     flags  = read_uint(f, 4)
+    speed  = read_uint(f, 2)
 
-    _speed_deprecated  = read_ignore(f, 2)
     _reserved0 = read_ignore(f,4)
     _reserved1 = read_ignore(f,4)
 
@@ -518,6 +520,7 @@ def read_ase_header(f: BufferedReader):
         Point(width, height),
         bpp,
         flags,
+        speed,
         pal_entry,
         num_colors,
         Point(px_w, px_h),
@@ -657,9 +660,6 @@ def read_ase_file(filename: str):
         )
 
 
-def write_ase_file(file: AsepriteFile):
-    # TODO
-    ...
 
 def indexed_to_rgba(data: bytes, pal: Palette, bg_idx: int):
     for x in data:
@@ -809,6 +809,18 @@ def create_ase_document(ase: AsepriteFile, name: str):
 
     d.refreshProjection()
     app.activeWindow().addView(d)
+
+def update_ase_file():
+    # TODO: update the current
+    ...
+
+def new_ase_file():
+    # TODO: create a new aseprite file from the document
+    ...
+
+def save_ase_file(ase: AsepriteFile):
+    # TODO: save aseprite file where we already have one loaded
+    ...
 
 if __name__ == "__main__":
     file = QFileDialog().getOpenFileName(caption="Open Aseprite file...", filter="Aseprite files (*.ase *.aseprite)")
