@@ -25,11 +25,12 @@ So far there is support for opening Aseprite files into a new document with all 
 Here's a non-exhaustive list of things not yet implemented:
 - Saving documents as `.aseprite` / `.ase` files
 - Palettes
-    - Transparent color idx in sprites with Indexed color mode
 - Grids
-- Anything involving tiles / tilesets
+- Non 1:1 pixel ratios
+- Reference layers
 - Tags
 - Any and all user data (e.g. custom layer colors)
 - Files with more than one frame (such files still load, but only the cels in the first frame will be added to the document)
     - Additionally, due to how krita handles animations vs. aseprite (with tags and user data), this might require custom dockers to implement
+- Anything involving tiles / tilesets
 - etc...

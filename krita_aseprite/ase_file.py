@@ -669,9 +669,9 @@ def rgba_to_bgra(data: bytes):
         else:
             yield data[i]
 
-def indexed_to_bgra(data: bytes, pal: Palette):
+def indexed_to_bgra(data: bytes, pal: Palette, bg_idx: int):
     for x in data:
-        r,g,b,a,_ = pal.colors[x]
+        r,g,b,a,_ = pal.colors[x] if x != bg_idx else (0, 0, 0, 0, None)
         yield b
         yield g
         yield r
@@ -783,7 +783,8 @@ def create_ase_document(ase: AsepriteFile, name: str):
                     elif ase.header.bpp == 16:  # Grayscale
                         node.setPixelData(data, x, y, w, h)
                     else:                       # Indexed
-                        node.setPixelData(bytes(indexed_to_bgra(data, ase.palette)), x, y, w, h)
+                        bg_idx = ase.header.pal_entry if (ase.layers[cel.layer_idx].layer_flags & LayerFlags.BACKGROUND) == 0 else -1
+                        node.setPixelData(bytes(indexed_to_bgra(data, ase.palette, bg_idx)), x, y, w, h)
                 case CelType.LINKED:
                     print("   linked cel type!")
                     raise NotImplementedError("Linked cels not implemented... yet")
