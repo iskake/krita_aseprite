@@ -1,14 +1,32 @@
+from dataclasses import dataclass
+import os
 import struct
 import zlib
 
 from enum import IntEnum, IntFlag
-from typing import NamedTuple as T
+from typing import Any, NamedTuple as T, TypeAlias
 from io import BufferedReader
 
 from krita import *
-from PyQt5.QtWidgets import QFileDialog
+
+from PyQt5.QtWidgets import QDialog, QFileDialog
 from PyQt5.QtCore import QByteArray
 from PyQt5.QtGui import QImage
+
+
+class Point(T):
+    x: int
+    y: int
+
+class Fixed(T):
+    lhs: int
+    rhs: int
+
+class Rect(T):
+    x: int
+    y: int
+    w: int
+    h: int
 
 
 # unsigned int
@@ -23,9 +41,9 @@ def read_sint(f: BufferedReader, size: int) -> int:
     return int.from_bytes(f.read(size), byteorder="little", signed=True)
 
 # fixed point
-def read_fixed(f: BufferedReader) -> tuple[int,int]:
+def read_fixed(f: BufferedReader) -> Fixed:
     # TODO: check if this is correct?
-    return (read_uint(f,2), read_uint(f,2))
+    return Fixed(read_uint(f,2), read_uint(f,2))
 
 # floating
 def read_float(f: BufferedReader, size: int) -> float:
@@ -41,18 +59,7 @@ def read_string(f: BufferedReader) -> str:
     return f.read(length).decode("utf-8")
 
 def read_ignore(f: BufferedReader, size: int) -> None:
-    f.seek(size, 1)
-
-
-class Point(T):
-    x: int
-    y: int
-
-class Rect(T):
-    x: int
-    y: int
-    w: int
-    h: int
+    _ = f.seek(size, 1)
 
 
 class ChunkType(IntEnum):
@@ -90,26 +97,15 @@ ASE_CHUNK_TYPE_NAMES = {
 
 
 
-class Layer:
-    def __init__(
-        self,
-        layer_flags: int,
-        layer_type:  int,
-        child_level: int,
-        blend_mode:  int,
-        opacity: int,
-        name: str,
-        tileset_idx: int|None,
-        uuid: bytes|None,
-    ):
-        self.layer_flags = layer_flags
-        self.layer_type = layer_type
-        self.child_level = child_level
-        self.blend_mode = blend_mode
-        self.opacity = opacity
-        self.name = name
-        self.tileset_idx = tileset_idx
-        self.uuid = uuid
+class Layer(T):
+    layer_flags: int
+    layer_type:  int
+    child_level: int
+    blend_mode:  int
+    opacity: int
+    name: str
+    tileset_idx: int|None
+    uuid: bytes|None
 
 class LayerFlags(IntFlag):
     VISIBLE            = 0b0000_0001
@@ -158,26 +154,30 @@ def read_chunk_layer(f: BufferedReader, use_uuid: bool):
     )
 
 
+RawPixelData: TypeAlias = tuple[int, int, bytes]
+TilesData: TypeAlias = tuple[int, int, int, int, int, int, int, bytes]
 
+@dataclass
 class Cel:
-    def __init__(self, layer_idx: int, pos: Point, opacity: int, cel_type: int, z_index: int, data: tuple):
-        self.layer_idx = layer_idx
-        self.pos = pos
-        self.opacity = opacity
-        self.cel_type = cel_type
-        self.z_index = z_index
-        self.data = data
+    layer_idx: int
+    pos: Point
+    opacity: int
+    cel_type: int
+    z_index: int
+    data: int | RawPixelData | TilesData
 
-        self.flags = None
-        self.precise_pos = None
-        self.width = None
-        self.weight = None
+    flags:  int|None = None
+    width:  Fixed|None = None
+    height: Fixed|None = None
+    precise_pos: tuple[Fixed, Fixed] | None = None
 
 class CelType(IntEnum):
     IMG_RAW      = 0
     LINKED       = 1
     IMG_COMP     = 2
     TILEMAP_COMP = 3
+
+
 
 def read_chunk_cel(f: BufferedReader, size: int) -> Cel:
     layer_idx = read_uint(f, 2)
@@ -194,33 +194,41 @@ def read_chunk_cel(f: BufferedReader, size: int) -> Cel:
     print("      cel_type: ", cel_type)
     print("      z_index:  ", z_index)
 
+    size -= 16  # preceding read bytes
+
     match cel_type:
         case CelType.IMG_RAW:
-            print("!!cel type is 0!")
+            print("!!cel type is 0 (IMG_RAW)!")
             cel_w = read_uint(f, 2)
             cel_h = read_uint(f, 2)
+
+            size -= 4
+
             print("        cel_w:", cel_w)
             print("        cel_h:", cel_h)
 
-            pixels = read_pixels(f, size - sum([2,2,2,1,2,2,5,2,2]))
+            pixels = read_pixels(f, size)
             print(f"        pixels len: {len(pixels)}")
             data = (cel_w, cel_h, pixels)
         case CelType.LINKED:
-            print("        !!cel type is 1!")
+            print("        !!cel type is 1 (LINKED!")
             data = read_uint(f, 2)
         case CelType.IMG_COMP:
-            print("        !!cel type is 2!")
+            print("        !!cel type is 2 (IMG_COMP)!")
             cel_w = read_uint(f, 2)
             cel_h = read_uint(f, 2)
+
+            size -= 4
+
             print("        cel_w:", cel_w)
             print("        cel_h:", cel_h)
 
-            pixels_compressed = read_pixels(f, size - sum([2,2,2,1,2,2,5,2,2]))
+            pixels_compressed = read_pixels(f, size)
             pixels = zlib.decompress(pixels_compressed)
             print(f"        pixels len: {len(pixels)}")
             data = (cel_w, cel_h, pixels)
         case CelType.TILEMAP_COMP:
-            print("          !!cel type is 3!")
+            print("          !!cel type is 3 (TILEMAP_COMP!")
             tiles_w   = read_uint(f, 2)
             tiles_h   = read_uint(f, 2)
             tiles_bpp = read_uint(f, 2)
@@ -229,7 +237,10 @@ def read_chunk_cel(f: BufferedReader, size: int) -> Cel:
             bitmask_y_flip    = read_uint(f, 4)
             bitmask_diag_flip = read_uint(f, 4)
             _reserved = read_ignore(f, 10)
-            tiles_compressed = read_bytes(f, size - sum([2,2,2,1,2,2,5,2,2,2,4,4,4,4,10]))
+
+            size -= 32
+
+            tiles_compressed = read_bytes(f, size)
             tiles = zlib.decompress(tiles_compressed)
             data = (
                 tiles_w,
@@ -241,7 +252,7 @@ def read_chunk_cel(f: BufferedReader, size: int) -> Cel:
                 bitmask_diag_flip,
                 tiles
             )
-            raise NotImplementedError()
+            raise NotImplementedError(f"Compressed tilemap is not yet supported.")
         case _: # invalid
             raise Exception(f"Invalid cel type `{cel_type}`")
     return Cel(layer_idx, Point(x_pos,y_pos), opacity, cel_type, z_index, data)
@@ -262,18 +273,14 @@ def read_chunk_cel_extra(f: BufferedReader, cel: Cel) -> None:
 
 
 # TODO? replace with just `list[Cel]`?
-class Frame:
-    def __init__(self, cels: list[Cel]):
-        self.cels = cels
+Frame: TypeAlias = list[Cel]
 
 
-
-class ColorProfile:
-    def __init__(self, profile_type: int, flags: bool, gamma: tuple[int,int], data: bytes|None = None):
-        self.profile_type = profile_type
-        self.flags = flags
-        self.gamma = gamma
-        self.data = data
+class ColorProfile(T):
+    profile_type: int
+    flags: bool
+    gamma: tuple[int,int]
+    data: bytes|None = None
 
 class ColorProfileType(IntEnum):
     PROFILE_NONE = 0
@@ -305,14 +312,12 @@ def read_chunk_color_profile(f: BufferedReader) -> ColorProfile:
 # TODO: external files chunk
 
 
-
-class Tag:
-    def __init__(self, from_frame: int, to_frame: int, loop_direction: int, repeat_times: int, name: str) -> None:
-        self.from_frame = from_frame
-        self.to_frame = to_frame
-        self.loop_direction = loop_direction
-        self.repeat_times = repeat_times
-        self.name = name
+class Tag(T):
+    from_frame: int
+    to_frame: int
+    loop_direction: int
+    repeat_times: int
+    name: str
 
 
 def read_tags_chunk(f: BufferedReader) -> list[Tag]:
@@ -320,7 +325,7 @@ def read_tags_chunk(f: BufferedReader) -> list[Tag]:
     print("      num tags:", num_tags)
     _reserved0 = read_ignore(f, 8)
 
-    tags = []
+    tags: list[Tag] = []
 
     for _ in range(num_tags):
         from_frame = read_uint(f, 2)
@@ -350,10 +355,9 @@ class Color(T):
     a: int
     name: None|str
 
-class Palette:
-    def __init__(self, size: int, colors: list[Color]):
-        self.size = size
-        self.colors = colors
+class Palette(T):
+    size: int
+    colors: list[Color]
 
 def read_palette_chunk(f: BufferedReader):
     pal_size  = read_uint(f, 4)
@@ -365,7 +369,7 @@ def read_palette_chunk(f: BufferedReader):
     print("      first idx:", first_idx)
     print("      last idx: ", last_idx)
 
-    colors = []
+    colors: list[Color] = []
     for _ in range(first_idx, last_idx+1):
         flags = read_uint(f, 2)
         r = read_uint(f, 1)
@@ -381,7 +385,7 @@ def read_palette_chunk_old(f: BufferedReader):
     packets  = read_uint(f, 2)
 
     print("      pal packets:", packets)
-    colors = []
+    colors: list[Color] = []
     pal_size = 0
 
     for _ in range(packets):
@@ -400,11 +404,10 @@ def read_palette_chunk_old(f: BufferedReader):
 
 
 # TODO!! actually handle user data for objects/chunks...
-class UserData:
-    def __init__(self, text: str, color: Color, properties) -> None:
-        self.text = text
-        self.color = color
-        self.properties = properties
+class UserData(T):
+    text:       str | None
+    color:      Color | None
+    properties: Any | None
 
 def read_user_data_chunk(f: BufferedReader):
     flags = read_uint(f, 4)
@@ -432,28 +435,16 @@ def read_user_data_chunk(f: BufferedReader):
 
 
 
-class AsepriteFileHeader:
-    def __init__(
-        self,
-        num_frames: int,
-        bounds: Point,
-        bpp: int,
-        flags: int,
-        speed: int,
-        pal_entry: int,
-        num_colors: int,
-        px_size: Point,
-        grid: Rect
-    ):
-        self.num_frames = num_frames
-        self.bounds = bounds
-        self.bpp = bpp
-        self.flags = flags
-        self.speed = speed
-        self.pal_entry = pal_entry
-        self.num_colors = num_colors
-        self.px_size = px_size
-        self.grid = grid
+class AsepriteFileHeader(T):
+    num_frames: int
+    bounds: Point
+    bpp: int
+    flags: int
+    speed: int
+    trans_idx: int
+    num_colors: int
+    px_size: Point
+    grid: Rect
 
 class AsepriteFileHeaderFlags(IntFlag):
     LAYER_OPACITY_VALID         = 0b001
@@ -482,7 +473,7 @@ def read_ase_header(f: BufferedReader):
     _reserved0 = read_ignore(f,4)
     _reserved1 = read_ignore(f,4)
 
-    pal_entry = read_uint(f,1)
+    trans_idx = read_uint(f,1)
 
     # 3 ignore bytes
     read_ignore(f, 3)
@@ -506,7 +497,7 @@ def read_ase_header(f: BufferedReader):
     print("Height:", height)
     print("bpp:   ", 8)
     print("flags: ", flags)
-    print("trans pal idx:", pal_entry)
+    print("trans pal idx:", trans_idx)
     print("colors:", num_colors)
     print("px_w:  ", px_w)
     print("px_h:  ", px_h)
@@ -521,7 +512,7 @@ def read_ase_header(f: BufferedReader):
         bpp,
         flags,
         speed,
-        pal_entry,
+        trans_idx,
         num_colors,
         Point(px_w, px_h),
         Rect(grid_x, grid_y, grid_w, grid_h)
@@ -529,30 +520,17 @@ def read_ase_header(f: BufferedReader):
 
 
 
-class AsepriteFile:
-    def __init__(
-        self,
-        header: AsepriteFileHeader,
-        palette: Palette,
-        layers: list[Layer],
-        frames: list[Frame],
-        color_profile: ColorProfile,
-        # external_files # TODO
-        tags: list[Tag],
-        user_data: UserData,  #TODO!!!
-        # slice     # TODO
-        # tileset   # TODO
-    ):
-        self.header = header
-        self.color_profile = color_profile
-        self.palette = palette
-        self.layers = layers
-        self.frames = frames
-        # self.external_files = external_files # TODO
-        self.tags = tags,
-        self.user_data = user_data, #TODO!!!
-        #self.slice = slice     # TODO
-        #self.tileset = tileset # TODO
+class AsepriteFile(T):
+    header:  AsepriteFileHeader
+    palette: Palette | None
+    layers:  list[Layer]
+    frames:  list[Frame]
+    color_profile: ColorProfile | None
+    # external_files # TODO
+    tags:      list[Tag] | None
+    user_data: list[UserData] | None  #TODO!!!
+    # slice     # TODO
+    # tileset   # TODO
 
 def read_ase_file(filename: str):
     with open(filename, "rb") as f:
@@ -564,12 +542,12 @@ def read_ase_file(filename: str):
         print()
         print("Individual frames:")
 
-        frames = []
-        layers = []
+        frames: list[Frame] = []
+        layers: list[Layer] = []
         color_profile = None
         palette = None
         tags = None
-        user_data = []
+        user_data: list[UserData] = []
 
         for frame in range(header.num_frames):
             print(" Frame", frame)
@@ -593,10 +571,10 @@ def read_ase_file(filename: str):
 
             frame_chunks = frame_chunks_old if frame_chunks_new == 0 else frame_chunks_new
 
-            chunk_types = []
+            chunk_types: list[ChunkType] = []
             # TODO: handle for tags etc...
 
-            cels = []
+            cels: list[Cel] = []
 
             for chunk in range(frame_chunks):
                 print()
@@ -639,7 +617,7 @@ def read_ase_file(filename: str):
                         raise NotImplementedError(f"Currently not implemented for type: {chunk_type}")
 
                 chunk_types.append(chunk_type)
-            frames.append(Frame(cels))
+            frames.append(cels)
             print("  Final chunk types:")
             [print(f"    {ASE_CHUNK_TYPE_NAMES[x]} ({hex(x)})") for x in chunk_types]
 
@@ -691,7 +669,7 @@ BLEND_MODES = [
     "divide",
 ]
 
-def create_ase_document(ase: AsepriteFile, name: str):
+def load_document_from_ase(ase: AsepriteFile, name: str):
     app = Krita.instance()
 
     if ase.header.bpp == 16:
@@ -754,13 +732,23 @@ def create_ase_document(ase: AsepriteFile, name: str):
 
         node.setBlendingMode(BLEND_MODES[layer.blend_mode])
 
+        # TODO: check layers to see if this is actually required?
+        if len(ase.frames) > 1:
+            node.enableAnimation()
+
         parent_node_stack[-1].addChildNode(node, None)
         nodes.append(node)
 
         last_node = node
         last_child_level = layer.child_level
 
-    for frame in [ase.frames[0]]:
+    if len(ase.frames) > 1:
+        d.setPlayBackRange(0,len(ase.frames))
+
+    for i,frame in enumerate(ase.frames):
+        print(f"  frame: {i}")
+        d.setCurrentTime(i)
+        print("   current time:", d.currentTime())
         for cel in frame.cels:
             match cel.cel_type:
                 case CelType.IMG_RAW | CelType.IMG_COMP:
@@ -771,16 +759,21 @@ def create_ase_document(ase: AsepriteFile, name: str):
                     w, h, data = cel.data
 
                     if ase.header.bpp == 32:    # RGBA
-                        img_data = QImage(data, w, h, QImage.Format_RGBA8888).rgbSwapped()
+                        img_data = QImage(data, w, h, QImage.Format.Format_RGBA8888).rgbSwapped()
                     elif ase.header.bpp == 16:  # Grayscale
-                        img_data = QImage(data, w, h, QImage.Format_Grayscale16)
+                        img_data = QImage(data, w, h, QImage.Format.Format_Grayscale16)
                     else:                       # Indexed
-                        bg_idx = ase.header.pal_entry if (ase.layers[cel.layer_idx].layer_flags & LayerFlags.BACKGROUND) == 0 else -1
-                        img_data = QImage(bytes(indexed_to_rgba(data, ase.palette, bg_idx)), w, h, QImage.Format_RGBA8888).rgbSwapped()
+                        bg_idx = ase.header.trans_idx if (ase.layers[cel.layer_idx].layer_flags & LayerFlags.BACKGROUND) == 0 else -1
+                        assert ase.palette is not None
+                        img_data = QImage(bytes(indexed_to_rgba(data, ase.palette, bg_idx)), w, h, QImage.Format.Format_RGBA8888).rgbSwapped()
 
                     ptr = img_data.bits()
                     ptr.setsize(img_data.byteCount())
                     node.setPixelData(QByteArray(ptr.asstring()), x, y, w, h)
+
+                    if len(ase.frames) > 1:
+                        d.setActiveNode(node)
+                        app.action("add_blank_frame").trigger()
 
                 case CelType.LINKED:
                     print("   linked cel type!")
@@ -814,15 +807,85 @@ def update_ase_file():
     # TODO: update the current
     ...
 
-def new_ase_file():
+def create_ase_from_document() -> AsepriteFile | None:
     # TODO: create a new aseprite file from the document
-    ...
+    app = Krita.instance()
+    d = app.activeDocument()
 
-def save_ase_file(ase: AsepriteFile):
+    if d is None:
+        print("No active document to save!")
+        return None
+
+    # header
+    num_frames = 1 #d.animationLength() # TODO
+    bounds = Point(d.width(), d.height())
+
+    if d.colorModel() != "RGBA" and d.colorModel() != "GRAYA":
+        raise Exception(f"Unsupported color mode: {d.colorModel()}")
+
+    bpp = 16 if d.colorModel() == "GRAYA" else 32 # TODO: indexed (8 bpp)
+    header_flags = 0b011    #? TODO: check?
+    speed = 0
+    trans_idx = 0
+    num_colors = 1  # TODO
+    px_size = Point(1,1)    # TODO?
+    grid = Rect(0,0,16,16)  # TODO?
+
+    header = AsepriteFileHeader(
+        num_frames,
+        bounds,
+        bpp,
+        header_flags,
+        speed,
+        trans_idx,
+        num_colors,
+        px_size,
+        grid,
+    )
+
+    # palette
+    # TODO
+    palette = Palette(num_colors, [Color(0,0,0,0,None)])
+
+    # layers 
+    root = d.rootNode()
+    print("document nodes:")
+    _print_node_tree(root)
+
+    # frames
+    # TODO!
+
+    return AsepriteFile(
+        header,
+        palette,
+        layers,
+        frames,
+        color_profile,
+        tags,
+        user_data
+    )
+
+
+def _print_node_tree(node, level=0):
+    for child in node.childNodes():
+        print("  "*level, child.name(), child.type())
+        if type(child) is GroupLayer:
+            _print_node_tree(child, level+1)
+
+
+def save_ase_file(ase: AsepriteFile, filename: str):
     # TODO: save aseprite file where we already have one loaded
     ...
+    QDialog()
+    "WARNING!\nThis plugin does not implement all features of aseprite files,"
+    "meaning you WILL MOST LIKELY LOSE DATA if you overwrite a file created with aseprite."
+    "Use at your own risk, you have been warned!"
 
-if __name__ == "__main__":
+    with open(filename, "wb") as f:
+        print("Todo: write some bytes")
+        f.close()
+
+def load_main():
     file = QFileDialog().getOpenFileName(caption="Open Aseprite file...", filter="Aseprite files (*.ase *.aseprite)")
 
     print(f"File: {file[0]}" if file[0] else "No file selected!")
@@ -834,4 +897,20 @@ if __name__ == "__main__":
         ase = read_ase_file(ase_file_name)
         if ase is not None:
             print(f"read aseprite file with size {ase.header.bounds} and {ase.header.num_frames} frame(s)")
-            create_ase_document(ase, "abcd")
+            load_document_from_ase(ase, "abcd")
+
+def save_main():
+    print("TEMP FILENAME!!!") 
+    filename = "/home/iskake/projects/krita_aseprite_plugin/test_save.ase"
+    print(f"Saving file: {filename}")
+
+    ase = create_ase_from_document()
+
+    if ase is None:
+        print("No file to save!")
+    else:
+        save_ase_file(ase, filename)
+
+if __name__ == "__main__":
+    # load_main()
+    save_main()
