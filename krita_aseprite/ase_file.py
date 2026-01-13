@@ -273,7 +273,8 @@ def read_chunk_cel_extra(f: BufferedReader, cel: Cel) -> None:
 
 
 # TODO? replace with just `list[Cel]`?
-Frame: TypeAlias = list[Cel]
+class Frame(T):
+    cels: list[Cel]
 
 
 class ColorProfile(T):
@@ -617,7 +618,7 @@ def read_ase_file(filename: str):
                         raise NotImplementedError(f"Currently not implemented for type: {chunk_type}")
 
                 chunk_types.append(chunk_type)
-            frames.append(cels)
+            frames.append(Frame(cels))
             print("  Final chunk types:")
             [print(f"    {ASE_CHUNK_TYPE_NAMES[x]} ({hex(x)})") for x in chunk_types]
 
