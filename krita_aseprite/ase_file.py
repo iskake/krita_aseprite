@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import os
 import struct
 import zlib
 
@@ -97,7 +96,8 @@ ASE_CHUNK_TYPE_NAMES = {
 
 
 
-class Layer(T):
+@dataclass
+class Layer:
     layer_flags: int
     layer_type:  int
     child_level: int
@@ -273,14 +273,16 @@ def read_chunk_cel_extra(f: BufferedReader, cel: Cel) -> None:
 
 
 # TODO? replace with just `list[Cel]`?
-class Frame(T):
+@dataclass
+class Frame:
     cels: list[Cel]
 
 
-class ColorProfile(T):
+@dataclass
+class ColorProfile:
     profile_type: int
     flags: bool
-    gamma: tuple[int,int]
+    gamma: Fixed
     data: bytes|None = None
 
 class ColorProfileType(IntEnum):
@@ -313,7 +315,8 @@ def read_chunk_color_profile(f: BufferedReader) -> ColorProfile:
 # TODO: external files chunk
 
 
-class Tag(T):
+@dataclass
+class Tag:
     from_frame: int
     to_frame: int
     loop_direction: int
@@ -356,7 +359,8 @@ class Color(T):
     a: int
     name: None|str
 
-class Palette(T):
+@dataclass
+class Palette:
     size: int
     colors: list[Color]
 
@@ -405,7 +409,8 @@ def read_palette_chunk_old(f: BufferedReader):
 
 
 # TODO!! actually handle user data for objects/chunks...
-class UserData(T):
+@dataclass
+class UserData:
     text:       str | None
     color:      Color | None
     properties: Any | None
@@ -436,7 +441,8 @@ def read_user_data_chunk(f: BufferedReader):
 
 
 
-class AsepriteFileHeader(T):
+@dataclass
+class AsepriteFileHeader:
     num_frames: int
     bounds: Point
     bpp: int
@@ -521,7 +527,8 @@ def read_ase_header(f: BufferedReader):
 
 
 
-class AsepriteFile(T):
+@dataclass
+class AsepriteFile:
     header:  AsepriteFileHeader
     palette: Palette | None
     layers:  list[Layer]
@@ -679,8 +686,8 @@ def load_document_from_ase(ase: AsepriteFile, name: str):
         color_mode = "RGBA"
 
     d = app.createDocument(
-        ase.header.bounds[0],
-        ase.header.bounds[1],
+        ase.header.bounds.x,
+        ase.header.bounds.y,
         name,
         color_mode,
         "U8",
@@ -853,8 +860,27 @@ def create_ase_from_document() -> AsepriteFile | None:
     print("document nodes:")
     _print_node_tree(root)
 
+    nodes = get_nodes(root)
+    layers = get_layers_from_nodes(nodes)
+
     # frames
-    # TODO!
+    frames: list[Frame] = []
+    for frame_num in range(header.num_frames):
+        cels = get_cels(nodes, frame_num)
+        frames.append(Frame(cels))
+
+    # color profile
+    profile_type = ColorProfileType.PROFILE_SRGB    #?
+    flags = False #?
+    gamma = Fixed(0,0) #?
+    icc_data = None
+    color_profile = ColorProfile(profile_type, flags, gamma, icc_data)
+
+    # tags
+    tags = None
+
+    # user data
+    user_data = None
 
     return AsepriteFile(
         header,
@@ -866,6 +892,80 @@ def create_ase_from_document() -> AsepriteFile | None:
         user_data
     )
 
+def get_nodes(node, child_level=0) -> list[Node]:
+    nodes = []
+
+    for child in node.childNodes():
+        nodes.append((child, child_level))
+        if type(child) is GroupLayer:
+            child_children = get_nodes(child, child_level + 1)
+            nodes += [*child_children]
+
+    return nodes
+
+def get_layers_from_nodes(nodes) -> list[Layer]:
+    # TODO: multiple frames...
+    layers = []
+
+    print("nodes i got from the thing:")
+    for node, child_level in nodes:
+        print("   ", child_level, node.name(), node.type())
+
+        visible = int(node.visible())
+        editable = int(node.locked()) << 1
+        lock_movement = 0 << 2 # ?
+        background = 0 << 3 # ?
+        prefer_linked_cels = 0 << 4 # ?
+        display_collapsed = int(node.collapsed()) << 5
+        reference_layer = 0 << 6 # ?
+
+        flags = reference_layer | display_collapsed | prefer_linked_cels | background | lock_movement | editable | visible
+
+        # todo: tilemap (layer_type == 2)
+        layer_type = 0 if node.type() == "paintLayer" else 1
+
+        blend_mode = BLEND_MODES.index(node.blendingMode())
+
+        opacity = 255 if layer_type == 1 else node.opacity()
+
+        name = node.name()
+
+        tileset_idx = None
+        uuid = None
+
+        layers.append(Layer(flags, layer_type, child_level, blend_mode, opacity, name, tileset_idx, uuid))
+        # print(f"  added layer: {layers[-1]}")
+
+    return layers
+
+def get_cels(nodes: list[tuple[Node, int]], frame_num: int) -> list[Cel]:
+    cels: list[Cel] = []
+
+    for i, (node, child_level) in enumerate(nodes):
+        rect = node.bounds()
+        x = rect.x()
+        y = rect.y()
+        w = rect.width()
+        h = rect.height()
+        print(f"  node {node.name()} bounds?:", x,y,w,h)
+
+        opacity = 255 # node.opacity()  #??
+
+        z_index = 0 # ?
+
+        cel_type = 2
+        pixeldata = node.pixelData(x,y,w,h)
+
+        assert type(pixeldata) == QByteArray
+
+        pixels = zlib.compress(pixeldata)
+        data = (w, h, pixels)
+
+        # todo: anything other than non-indexed rgba images...
+        cels.append(Cel(i, Point(x,y), opacity, cel_type, z_index, data))
+        print(f"   appended cel with layer_idx:{i} at {x,y,w,h}, opacity {opacity}, celtype: {cel_type} z_index {z_index} and {len(pixels)} bytes (pre comp: {len(pixeldata)})")
+
+    return cels
 
 def _print_node_tree(node, level=0):
     for child in node.childNodes():
