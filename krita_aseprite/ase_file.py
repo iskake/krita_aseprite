@@ -8,9 +8,14 @@ from io import BufferedReader
 
 from krita import *
 
-from PyQt5.QtWidgets import QDialog, QFileDialog
-from PyQt5.QtCore import QByteArray
-from PyQt5.QtGui import QImage
+try:
+    from PyQt6.QtWidgets import QDialog, QFileDialog
+    from PyQt6.QtCore import QByteArray
+    from PyQt6.QtGui import QImage
+except:
+    from PyQt5.QtWidgets import QDialog, QFileDialog
+    from PyQt5.QtCore import QByteArray
+    from PyQt5.QtGui import QImage
 
 
 class Point(T):
@@ -776,7 +781,7 @@ def load_document_from_ase(ase: AsepriteFile, name: str):
                         img_data = QImage(bytes(indexed_to_rgba(data, ase.palette, bg_idx)), w, h, QImage.Format.Format_RGBA8888).rgbSwapped()
 
                     ptr = img_data.bits()
-                    ptr.setsize(img_data.byteCount())
+                    ptr.setsize(img_data.sizeInBytes())
                     node.setPixelData(QByteArray(ptr.asstring()), x, y, w, h)
 
                     if len(ase.frames) > 1:

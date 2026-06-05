@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from PyQt5.QtWidgets import QFileDialog
+try:
+    from PyQt6.QtWidgets import QFileDialog
+except:
+    from PyQt5.QtWidgets import QFileDialog
+
 from krita import *
 
 from .ase_file import AsepriteFile, read_ase_file, load_document_from_ase
